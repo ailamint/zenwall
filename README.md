@@ -7,7 +7,7 @@ your screen. Runs entirely in your browser: nothing is uploaded, nothing is stor
 
 → **[Open the web app](https://www.matthewnoh.com/wallpaper/)** · [Case study on matthewnoh.com](https://www.matthewnoh.com/work/zenwall/)
 
-![Zenwall: a mosaic wallpaper generated from an are.na channel](docs/preview.png)
+![Zenwall: a tiled mosaic wallpaper, sized for an ultrawide display](docs/preview.jpg)
 
 ## Why it exists
 
