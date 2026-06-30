@@ -1,4 +1,4 @@
-# Zenwall — Windows auto-rotation installer
+# Zenwall: Windows auto-rotation installer
 
 The web app makes wallpapers on demand. This folder is for the other half of the
 OLED story: a desktop that **rotates on its own**, so nothing ever sits static.
@@ -17,7 +17,7 @@ builds `WallpaperEngine.dll` on first run). No dependencies, no admin needed.
 ## Quick start
 
 ```powershell
-# 1. (optional) grab a channel — or just point at your own photo folder
+# 1. (optional) grab a channel, or just point at your own photo folder
 .\Get-ArenaChannel.ps1 -Url "quiet-images"
 
 # 2a. set one fresh wallpaper right now
