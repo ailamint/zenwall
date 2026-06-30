@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zenwall — tiled wallpaper from your photo dump</title>
+  <meta name="description" content="Turn any folder of photos — or an are.na channel — into a tiled mosaic wallpaper that's easy on OLED screens. Runs entirely in your browser; nothing is uploaded." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="masthead">
+      <div class="wordmark">
+        <span class="dot" aria-hidden="true"></span>
+        Zenwall
+      </div>
+      <p class="tagline">A tiled wallpaper from any photo dump — or an are.na channel. Easy on OLED.</p>
+    </header>
+
+    <div class="layout">
+      <!-- ───────────── Controls ───────────── -->
+      <aside class="panel" aria-label="Controls">
+
+        <section class="group">
+          <div class="group-title">Source</div>
+          <div class="tabs" role="tablist">
+            <button class="tab is-active" id="tab-photos" role="tab" aria-selected="true">Your photos</button>
+            <button class="tab" id="tab-arena" role="tab" aria-selected="false">are.na</button>
+          </div>
+
+          <div class="tabpanel" id="panel-photos">
+            <label class="dropzone" id="dropzone">
+              <input type="file" id="folder-input" accept="image/*" multiple webkitdirectory directory hidden />
+              <div class="dz-inner">
+                <strong>Drop a folder of images</strong>
+                <span>or click to choose · stays on your machine</span>
+              </div>
+            </label>
+          </div>
+
+          <div class="tabpanel is-hidden" id="panel-arena">
+            <input type="text" id="arena-url" class="text-input"
+                   placeholder="are.na channel URL or slug" autocomplete="off" spellcheck="false" />
+            <button class="btn btn-secondary" id="arena-load">Load channel</button>
+            <div class="examples">
+              Try:
+              <button class="chip" data-arena="arena-influences">arena-influences</button>
+              <button class="chip" data-arena="quiet-images">quiet-images</button>
+            </div>
+          </div>
+
+          <div class="source-status" id="source-status">No images loaded yet.</div>
+        </section>
+
+        <section class="group">
+          <div class="group-title">Layout</div>
+
+          <label class="control">
+            <span class="control-label">Tile density <em id="cols-val">22</em></span>
+            <input type="range" id="cols" min="8" max="34" value="22" />
+          </label>
+
+          <label class="control">
+            <span class="control-label">Gap <em id="gap-val">6px</em></span>
+            <input type="range" id="gap" min="0" max="24" value="6" />
+          </label>
+
+          <label class="control">
+            <span class="control-label">Resolution</span>
+            <select id="res" class="select">
+              <option value="screen">Fit my screen</option>
+              <option value="1920x1080">1920 × 1080</option>
+              <option value="2560x1440">2560 × 1440</option>
+              <option value="3840x2160">3840 × 2160 (4K)</option>
+              <option value="3440x1440">3440 × 1440 (ultrawide)</option>
+              <option value="5120x1440">5120 × 1440 (super-ultrawide)</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </label>
+          <div class="control custom-res is-hidden" id="custom-res">
+            <input type="number" id="res-w" class="text-input num" placeholder="width" min="320" />
+            <span class="x">×</span>
+            <input type="number" id="res-h" class="text-input num" placeholder="height" min="320" />
+          </div>
+        </section>
+
+        <section class="group">
+          <div class="group-title">
+            OLED
+            <button class="info" id="oled-info" aria-label="About OLED burn-in" title="Why this matters">i</button>
+          </div>
+          <label class="control">
+            <span class="control-label">Canvas</span>
+            <select id="bg" class="select">
+              <option value="#000000">True black (best for OLED)</option>
+              <option value="#0f0f14" selected>Near-black (the original)</option>
+              <option value="#14141a">Charcoal</option>
+            </select>
+          </label>
+          <p class="oled-note" id="oled-note">
+            Static pixels are what burn into OLED. Keep the background dark, and
+            rotate the wallpaper so nothing sits still — that's what the rotation pack is for.
+          </p>
+        </section>
+
+        <section class="group actions">
+          <button class="btn" id="reroll" disabled>↻ Re-roll layout</button>
+          <button class="btn btn-primary" id="download" disabled>Download PNG</button>
+          <button class="btn btn-secondary" id="pack" disabled>Export rotation pack…</button>
+          <div class="pack-status" id="pack-status"></div>
+        </section>
+
+      </aside>
+
+      <!-- ───────────── Preview ───────────── -->
+      <section class="stage">
+        <div class="stage-frame" id="stage-frame">
+          <canvas id="canvas" aria-label="Wallpaper preview"></canvas>
+          <div class="stage-empty" id="stage-empty">
+            <p>Load some photos to begin.</p>
+            <small>Everything runs in your browser. Nothing is uploaded.</small>
+          </div>
+          <div class="stage-busy is-hidden" id="stage-busy"><span class="spinner"></span><span id="busy-text">Loading…</span></div>
+        </div>
+        <div class="stage-meta" id="stage-meta"></div>
+      </section>
+    </div>
+
+    <footer class="footer">
+      <span>Runs entirely client-side. <a href="https://github.com/" id="repo-link" target="_blank" rel="noopener">Source on GitHub</a></span>
+      <span class="by">by Matthew Noh</span>
+    </footer>
+  </main>
+
+  <!-- OLED explainer -->
+  <dialog id="oled-dialog" class="dialog">
+    <h2>OLED burn-in, in one paragraph</h2>
+    <p>
+      On OLED panels each pixel makes its own light, and a pixel that shows the
+      same bright thing for hours slowly dims relative to its neighbours — a
+      faint ghost of your old layout, permanently. Wallpapers are the classic
+      culprit: they sit unchanged all day behind your windows.
+    </p>
+    <p>Zenwall leans on three habits:</p>
+    <ul>
+      <li><strong>Dark canvas.</strong> Black gaps draw no power and can't burn.</li>
+      <li><strong>Movement.</strong> Every re-roll reshuffles the whole mosaic, so no image keeps the same spot.</li>
+      <li><strong>Rotation.</strong> The pack writes a folder of shuffled variants — point your OS slideshow at it and the desktop is never static.</li>
+    </ul>
+    <button class="btn btn-primary" id="oled-close">Got it</button>
+  </dialog>
+
+  <script src="engine.js"></script>
+  <script src="arena.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

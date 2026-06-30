@@ -1,0 +1,10 @@
+# Compiled engine (generated on first run of the installer)
+installer/WallpaperEngine.dll
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+
+# Local preview config
+.claude/
