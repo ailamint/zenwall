@@ -336,20 +336,36 @@
     dz.addEventListener('drop', function (e) {
       if (!e.dataTransfer) return;
       var items = e.dataTransfer.items;
-      var hasEntries = items && items.length && typeof items[0].webkitGetAsEntry === 'function';
-      if (hasEntries) {
-        var entries = [];
+      var entries = [];
+      var flatFiles = [];
+      if (items && items.length) {
         for (var i = 0; i < items.length; i++) {
-          var ent = items[i].webkitGetAsEntry();
+          if (items[i].kind !== 'file') continue;
+          var ent = items[i].webkitGetAsEntry && items[i].webkitGetAsEntry();
           if (ent) entries.push(ent);
+          else {
+            var f = items[i].getAsFile && items[i].getAsFile();
+            if (f) flatFiles.push(f);
+          }
         }
-        collectEntryFiles(entries).then(function (files) {
-          if (files.length) handleFiles(files);
-          else if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
-        });
-      } else if (e.dataTransfer.files.length) {
-        handleFiles(e.dataTransfer.files);
       }
+      if (!entries.length && !flatFiles.length && e.dataTransfer.files && e.dataTransfer.files.length) {
+        flatFiles = Array.prototype.slice.call(e.dataTransfer.files);
+      }
+      var status = $('source-status');
+      if (entries.length) {
+        status.textContent = 'Reading folder…';
+        status.className = 'source-status';
+      }
+      collectEntryFiles(entries).then(function (walked) {
+        var all = flatFiles.concat(walked);
+        if (all.length) {
+          handleFiles(all);
+        } else {
+          status.textContent = 'Drop didn\'t deliver any files — try clicking to choose the folder instead.';
+          status.className = 'source-status is-error';
+        }
+      });
     });
 
     function collectEntryFiles(entries) {
