@@ -91,21 +91,22 @@
     return [[2, 2], [1, 1], [2, 1], [1, 2]];
   }
 
-  // Trim pure black (#000000) or pure white (#FFFFFF) borders baked into the
-  // source — letterbox bars and the white/black canvas margins common on
-  // illustrations. Scan inward from each edge counting whole rows/columns that
-  // are (near-)uniformly black or white; stop at the first line that breaks into
-  // real colour — the content boundary, which flips the whole line at once. Each
-  // edge is counted INDEPENDENTLY, so a subject that bleeds off one edge doesn't
-  // stop the others. Coloured photos/art (no black/white frame) trim nothing; a
-  // per-side cap plus an all-sides-maxed guard keep a solid black/white image
-  // from being gutted. Returns a source rect in original pixel coords.
+  // Trim a flat, uniform border baked into the source — the illustration's solid
+  // canvas margin (any colour: white, black, or a pastel field) or letterbox
+  // bars. Same scan Matthew described: from each edge, walk inward while the
+  // whole row/column stays one flat colour, and stop at the line where it breaks
+  // into real content (the subject), which changes across the axis all at once.
+  // The border colour is read from the outermost line rather than assumed to be
+  // black/white — the real arena art uses flat PASTEL margins (e.g. rgb 238,197,
+  // 211). Each edge is independent, so a subject bleeding off one edge doesn't
+  // stop the others. A busy/detailed edge (photo) never starts trimming; a
+  // per-side cap and an all-sides-maxed guard stop near-solid tiles from being
+  // gutted. Returns a source rect in original pixel coords.
   function detectContentRect(img, iw, ih) {
     const MAX = 150;         // downscale target — high enough to keep thin borders
     const CAP = 0.45;        // hard cap per side, fraction of dimension
-    const BLACK = 17;        // all channels <= this → a black pixel
-    const WHITE = 238;       // all channels >= this → a white pixel
-    const HIT = 0.985;       // fraction of a line that must be black OR white
+    const FLAT = 16;         // max stdev for a line to read as one flat colour
+    const DRIFT = 30;        // max per-channel mean drift from the outer band
     const full = { sx: 0, sy: 0, sw: iw, sh: ih };
     const scale = Math.min(1, MAX / Math.max(iw, ih));
     const w = Math.max(8, Math.round(iw * scale));
@@ -115,8 +116,8 @@
       const cv = document.createElement('canvas');
       cv.width = w; cv.height = h;
       const c = cv.getContext('2d', { willReadFrequently: true });
-      // Nearest-neighbor keeps the border crisp so a near-white margin stays
-      // white instead of blending into a grey that fails the test.
+      // Nearest-neighbor keeps the border crisp so the first content line reads
+      // as content, not a blended mid-tone that still looks like border.
       c.imageSmoothingEnabled = false;
       c.drawImage(img, 0, 0, w, h);
       data = c.getImageData(0, 0, w, h).data;
@@ -124,35 +125,51 @@
       return full; // tainted canvas (CORS) — leave the image alone
     }
 
-    // Is the row/column at `fixed` uniformly black OR uniformly white?
-    function isBorder(fixed, isRow) {
+    // Mean colour + stdev of a whole row (isRow) or column at index `fixed`.
+    function lineStats(fixed, isRow) {
       const n = isRow ? w : h;
-      let black = 0, white = 0;
+      let sr = 0, sg = 0, sb = 0;
       for (let k = 0; k < n; k++) {
         const i = (isRow ? (fixed * w + k) : (k * w + fixed)) * 4;
-        const r = data[i], g = data[i + 1], b = data[i + 2];
-        if (r <= BLACK && g <= BLACK && b <= BLACK) black++;
-        else if (r >= WHITE && g >= WHITE && b >= WHITE) white++;
+        sr += data[i]; sg += data[i + 1]; sb += data[i + 2];
       }
-      return black / n >= HIT || white / n >= HIT;
+      const mr = sr / n, mg = sg / n, mb = sb / n;
+      let v = 0;
+      for (let k = 0; k < n; k++) {
+        const i = (isRow ? (fixed * w + k) : (k * w + fixed)) * 4;
+        const dr = data[i] - mr, dg = data[i + 1] - mg, db = data[i + 2] - mb;
+        v += dr * dr + dg * dg + db * db;
+      }
+      return { r: mr, g: mg, b: mb, stdev: Math.sqrt(v / (3 * n)) };
     }
-    // Count border lines from one edge inward, up to the cap.
-    function countEdge(isRow, fromStart, cap) {
+    function near(s, ref) {
+      return Math.abs(s.r - ref.r) <= DRIFT && Math.abs(s.g - ref.g) <= DRIFT && Math.abs(s.b - ref.b) <= DRIFT;
+    }
+
+    // Lines to peel from one edge. `isRow`=top/bottom; `fromStart` picks the end.
+    // Bails unless the outermost line is itself a flat band.
+    function trimEdge(isRow, fromStart, cap) {
       const last = isRow ? h - 1 : w - 1;
-      let t = 0;
-      while (t < cap && isBorder(fromStart ? t : last - t, isRow)) t++;
+      const outer = lineStats(fromStart ? 0 : last, isRow);
+      if (outer.stdev > FLAT) return 0;
+      let t = 1;
+      while (t < cap) {
+        const s = lineStats(fromStart ? t : last - t, isRow);
+        if (s.stdev <= FLAT && near(s, outer)) t++;
+        else break;
+      }
       return t;
     }
 
     const capV = Math.floor(h * CAP);
     const capH = Math.floor(w * CAP);
-    const top = countEdge(true, true, capV);
-    const bot = countEdge(true, false, capV);
-    const left = countEdge(false, true, capH);
-    const right = countEdge(false, false, capH);
+    const top = trimEdge(true, true, capV);
+    const bot = trimEdge(true, false, capV);
+    const left = trimEdge(false, true, capH);
+    const right = trimEdge(false, false, capH);
 
     if (!top && !bot && !left && !right) return full;
-    // Whole image reads as black/white (a blank/near-blank tile) → leave alone.
+    // Every edge maxed out → the whole tile reads as one flat colour → leave it.
     if (top >= capV && bot >= capV && left >= capH && right >= capH) return full;
 
     const sx = Math.round((left / w) * iw);
