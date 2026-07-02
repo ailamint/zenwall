@@ -91,28 +91,31 @@
     return [[2, 2], [1, 1], [2, 1], [1, 2]];
   }
 
-  // Detect solid black/white bars baked into the source image (letterboxing).
-  // Only strips bars that appear on OPPOSING edges — a single-side bar is
-  // almost always real content (sky, tabletop, negative space). Caps each side
-  // at ~20% so solid-background illustrations (moon on black, subject on white)
-  // pass through untouched. Returns a source rect in original pixel coords.
+  // Trim a flat, uniform margin baked into the source image — letterbox bars OR
+  // an illustration's flat background padding (any color, any side, symmetric or
+  // not). Approach: estimate the frame color from the 1px perimeter (median, so a
+  // subject touching one edge doesn't spoil it); if enough of the perimeter is
+  // that one color it's a framed image, so trim each edge inward while the whole
+  // line stays that color. Photos (varied perimeter) and solid/gradient art (the
+  // whole image reads as frame) are left untouched. Returns a source rect in
+  // original pixel coords, capped per side so we never gut the image.
   function detectContentRect(img, iw, ih) {
-    const MAX = 64;        // downscale target — plenty for band detection
-    const CAP = 0.22;      // hard cap per side, fraction of dimension
-    const UNIFORM = 10;    // stdev threshold for "uniform" row/col
-    const DARK = 26;       // mean <= this → black bar
-    const LIGHT = 229;     // mean >= this → white bar
+    const MAX = 72;          // downscale target — plenty for margin detection
+    const CAP = 0.4;         // hard cap per side, fraction of dimension
+    const TOL = 14;          // per-channel closeness to the frame color
+    const LINE = 0.98;       // fraction of a line that must be frame to trim it
+    const PERIM = 0.72;      // fraction of the perimeter that must be one color
     const full = { sx: 0, sy: 0, sw: iw, sh: ih };
     const scale = Math.min(1, MAX / Math.max(iw, ih));
-    const w = Math.max(4, Math.round(iw * scale));
-    const h = Math.max(4, Math.round(ih * scale));
+    const w = Math.max(6, Math.round(iw * scale));
+    const h = Math.max(6, Math.round(ih * scale));
     let data;
     try {
       const cv = document.createElement('canvas');
       cv.width = w; cv.height = h;
       const c = cv.getContext('2d', { willReadFrequently: true });
-      // Nearest-neighbor: keeps bar edges crisp so a 3px-in column reads as
-      // pure black/white, not a blended mid-gray that fails the uniform test.
+      // Nearest-neighbor keeps the margin edge crisp so the first content line
+      // reads as content, not a blended mid-tone that still looks like frame.
       c.imageSmoothingEnabled = false;
       c.drawImage(img, 0, 0, w, h);
       data = c.getImageData(0, 0, w, h).data;
@@ -120,44 +123,53 @@
       return full; // tainted canvas (CORS) — leave the image alone
     }
 
-    function lineStats(fixed, isRow) {
-      const n = isRow ? w : h;
-      let sr = 0, sg = 0, sb = 0;
-      for (let k = 0; k < n; k++) {
-        const i = (isRow ? (fixed * w + k) : (k * w + fixed)) * 4;
-        sr += data[i]; sg += data[i + 1]; sb += data[i + 2];
-      }
-      const mr = sr / n, mg = sg / n, mb = sb / n;
-      let vr = 0, vg = 0, vb = 0;
-      for (let k = 0; k < n; k++) {
-        const i = (isRow ? (fixed * w + k) : (k * w + fixed)) * 4;
-        const dr = data[i] - mr, dg = data[i + 1] - mg, db = data[i + 2] - mb;
-        vr += dr * dr; vg += dg * dg; vb += db * db;
-      }
-      const stdev = Math.sqrt((vr + vg + vb) / (3 * n));
-      return { mean: (mr + mg + mb) / 3, stdev: stdev };
+    function at(x, y) { const i = (y * w + x) * 4; return [data[i], data[i + 1], data[i + 2]]; }
+    function close(p, q) {
+      return Math.abs(p[0] - q[0]) <= TOL && Math.abs(p[1] - q[1]) <= TOL && Math.abs(p[2] - q[2]) <= TOL;
     }
-    function isBar(s) {
-      return s.stdev <= UNIFORM && (s.mean <= DARK || s.mean >= LIGHT);
+
+    // Collect the 1px perimeter and take its per-channel median as the frame color.
+    const perim = [];
+    for (let x = 0; x < w; x++) { perim.push(at(x, 0)); perim.push(at(x, h - 1)); }
+    for (let y = 1; y < h - 1; y++) { perim.push(at(0, y)); perim.push(at(w - 1, y)); }
+    function median(vals) { vals.sort(function (a, b) { return a - b; }); return vals[vals.length >> 1]; }
+    const bg = [
+      median(perim.map(function (p) { return p[0]; })),
+      median(perim.map(function (p) { return p[1]; })),
+      median(perim.map(function (p) { return p[2]; }))
+    ];
+    let bgHits = 0;
+    for (let i = 0; i < perim.length; i++) if (close(perim[i], bg)) bgHits++;
+    if (bgHits / perim.length < PERIM) return full; // no uniform frame → leave alone
+
+    function rowIsBg(y) {
+      let m = 0;
+      for (let x = 0; x < w; x++) if (close(at(x, y), bg)) m++;
+      return m / w >= LINE;
+    }
+    function colIsBg(x) {
+      let m = 0;
+      for (let y = 0; y < h; y++) if (close(at(x, y), bg)) m++;
+      return m / h >= LINE;
     }
 
     const capV = Math.floor(h * CAP);
     const capH = Math.floor(w * CAP);
     let top = 0, bot = 0, left = 0, right = 0;
-    while (top < capV && isBar(lineStats(top, true))) top++;
-    while (bot < capV && isBar(lineStats(h - 1 - bot, true))) bot++;
-    while (left < capH && isBar(lineStats(left, false))) left++;
-    while (right < capH && isBar(lineStats(w - 1 - right, false))) right++;
+    while (top < capV && rowIsBg(top)) top++;
+    while (bot < capV && rowIsBg(h - 1 - bot)) bot++;
+    while (left < capH && colIsBg(left)) left++;
+    while (right < capH && colIsBg(w - 1 - right)) right++;
 
-    // Require opposing-edge symmetry; otherwise it's content, not a bar.
-    if (top === 0 || bot === 0) { top = 0; bot = 0; }
-    if (left === 0 || right === 0) { left = 0; right = 0; }
     if (!top && !bot && !left && !right) return full;
+    // Everything looked like frame (solid/gradient art) — don't gut it.
+    if (top >= capV && bot >= capV && left >= capH && right >= capH) return full;
 
     const sx = Math.round((left / w) * iw);
     const sy = Math.round((top / h) * ih);
     const sw = Math.max(1, iw - sx - Math.round((right / w) * iw));
     const sh = Math.max(1, ih - sy - Math.round((bot / h) * ih));
+    if (sw < iw * 0.15 || sh < ih * 0.15) return full; // degenerate crop guard
     return { sx: sx, sy: sy, sw: sw, sh: sh };
   }
 
